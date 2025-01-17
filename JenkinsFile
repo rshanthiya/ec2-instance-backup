@@ -3,6 +3,7 @@ pipeline {
   stages {
     stage('shutdown and take the snapshot') {
       steps {
+      withAWS(credentials: 'AWS-CRED', region: 'us-east-1') {
         sh 'chmod 755 ./awsec2-snapshot.sh'
         sh 'bash -x ./awsec2-snapshot.sh "${REGION}" "${INSTANCE_NAME}" "${ACCOUNT}" "${DESCRIPTION}" "${SHUTDOWN}"'
         sh 'git checkout ./awsec2-snapshot.sh'
