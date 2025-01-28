@@ -1,0 +1,3 @@
+taking EC2-Instance-backup for all the aws accounts.
+for INSTANCE in $(AWS_PROFILE=${Account} aws --region us-east-1  ec2 describe-instances --output text --query 'Reservations[*].Instances[*].InstanceId') ;\do AWS_PROFILE=${Account} aws  ec2 create-snapshots --instance-specification InstanceId=$INSTANCE --copy-tags-from-source volume --description "Patching snapshot of a volume from $INSTANCE" --region us-east-1; done;
+ 
