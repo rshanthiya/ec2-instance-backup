@@ -1,0 +1,55 @@
+all server report:
+ 
+ 
+touch npd-stopped-instances.csv
+ 
+echo "INSTANCENAME,IPADDRESS,OS" >npd-stopped-instances.csv
+ 
+for INSTANCE in $(aws --region us-east-1 ec2 describe-instances --filter "Name=tag:PatchApproved,Values=yes" "Name=instance-state-name,Values=stopped" --output text --query 'Reservations[*].Instances[*].InstanceId') ;\
+do
+echo $INSTANCE
+INSTANCENAME=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].Tags[?Key=='Name'].Value")
+IPADDRESS=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].PrivateIpAddress")
+OS=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].Tags[?Key=='Os'].Value")
+echo "\"$INSTANCENAME\",\"$IPADDRESS\",\"$OS\"" >> npd-stopped-instances.csv ;\
+done
+cat npd-stopped-instances.csv
+ 
+  *******************
+ 
+ 
+instance name alone:
+ 
+aws ec2 describe-instances \
+    --filters "Name=tag:PatchApproved,Values=yes" "Name=instance-state-name,Values=stopped" \
+    --query 'Reservations[*].Instances[*].Tags[?Key==`Name`].Value' \
+    --output text | tr '\t' ',' > stopped_instances.csv
+ 
+ **********************************
+touch npd-stopped-instances.csv
+ 
+echo "INSTANCENAME,IPADDRESS,OS,STATUS" >npd-stopped-instances.csv
+ 
+for INSTANCE in $(aws --region us-east-1 ec2 describe-instances --filter "Name=tag:PatchApproved,Values=yes" "Name=instance-state-name,Values=running" --output text --query 'Reservations[*].Instances[*].InstanceId') ;\
+do
+echo $INSTANCE
+INSTANCENAME=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].Tags[?Key=='Name'].Value")
+IPADDRESS=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].PrivateIpAddress")
+OS=$(aws --region us-east-1 ec2 describe-instances --instance-id $INSTANCE --output text --query "Reservations[].Instances[].Tags[?Key=='Os'].Value")
+# Send a simple "hostname" command to the instance to check connectivity
+COMMAND_ID=$(aws ssm send-command \
+  --instance-ids "$INSTANCE" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["hostname"]' \
+  --query "Command.CommandId" \
+  --output text)
+sleep 20s
+# Wait for the command to complete and check the result
+STATUS=$(aws ssm list-command-invocations \
+  --command-id "$COMMAND_ID" \
+  --query "CommandInvocations[0].Status" \
+  --output text)
+echo "\"$INSTANCENAME\",\"$IPADDRESS\",\"$OS\",\"$STATUS\"" >> npd-stopped-instances.csv ;\
+done
+cat npd-stopped-instances.csv
+ 
