@@ -1,0 +1,216 @@
+#!/bin/bash
+# Define the output CSV file
+output_file="server_status_report.csv"
+# Write the CSV header
+echo "INSTANCENAME,InstanceID,IPADDRESS,InstanceState,OS,SSMStatus,SSMCONNECTIVITY_STATUS" > $output_file
+ 
+# Get the list of all instances
+instances=$(aws --region us-east-1 ec2 describe-instances --filter "Name=tag:PatchApproved,Values=yes" --output text --query 'Reservations[*].Instances[*].InstanceId')
+ 
+# Loop through each instance
+for instance in $instances; do
+# Get the instance state
+    state=$(aws ec2 describe-instances --instance-ids $instance --query 'Reservations[*].Instances[*].State.Name' --output text)
+# Get the instance name
+    INSTANCENAME=$(aws --region us-east-1 ec2 describe-instances --instance-id $instance --output text --query "Reservations[].Instances[].Tags[?      Key=='Name'].Value")
+ 
+# Get the instance IP_ADDRESS
+ 
+IPADDRESS=$(aws --region us-east-1 ec2 describe-instances --instance-id $instance --output text --query "Reservations[].Instances[].PrivateIpAddress")
+ 
+# Get the instance OS Details
+OS=$(aws --region us-east-1 ec2 describe-instances --instance-id $instance --output text --query "Reservations[].Instances[].Tags[?Key=='Os'].Value")
+# Check SSM agent connectivity
+    ssm_status=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$instance" --query 'InstanceInformationList[*].PingStatus' --output text)
+    # If SSM status is empty, set it to "Not Connected"
+    if [ -z "$ssm_status" ]; then
+        ssm_status="Not Connected"
+    fi
+ 
+# Send a simple "hostname" command to the instance to check connectivity
+COMMAND_ID=$(aws ssm send-command \
+  --instance-ids "$instance" \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["hostname"]' \
+  --query "Command.CommandId" \
+  --output text)
+sleep 5s
+# Wait for the command to complete and check the result
+SSMCONNECTIVITY_STATUS=$(aws ssm list-command-invocations \
+  --command-id "$COMMAND_ID" \
+  --query "CommandInvocations[0].Status" \
+  --output text)
+# Write the instance details to the CSV file
+    echo "$INSTANCENAME,$instance,$IPADDRESS,$state,$OS,$ssm_status,$SSMCONNECTIVITY_STATUS" >> $output_file
+done
+echo "Report generated: $output_file"
+ 
+ 
+ 
+ 
+ 
+*****************************************************************************
+ 
+ 
+ 
+ 
+*******************************
+ 
+#!/bin/bash
+touch s3-inventory-report.csv
+ 
+AGE="1"
+DESC_PREFIX="S3 inventory Report"
+REGION="us-east-1"
+environment=("dev" "tst" "prd","aws1")
+ 
+output_file="s3-inventory-report.csv"
+ 
+echo "OWNER_ID,ACCOUNT_NAME,BUCKET_NAME,CREATION_DATE" > $output_file
+ 
+dev_accounts=("kat-devapp" "kcc-devapp" "kcs-devapp" "kct-devedt" "kct-devmon" "kct-devorc" "kct-devsvc" "kct-devwam" "klh-devapp" "klh-sbxapp" "kpc-devapp" "kpi-devapp")
+ 
+tst_accounts=("kat-tstapp" "kcc-tstapp" "kcs-tstapp" "kct-tstedt" "kct-tstmon" "kct-tstorc" "kct-tstsvc" "kct-tstwam" "kct-tstweb" "klh-tstapp" "kpc-tstapp" "kpi-tstapp")
+ 
+prd_accounts=("kat-prdapp" "kat-prddso" "kcc-prdapp" "kcs-prdapp" "kcs-prdsec" "kct-prdedt" "kct-prdmon" "kct-prdnet" "kct-prdorc" "kct-prdsed" "kct-prdsvc" "kct-prdwam" "kct-prdweb" "klh-prdapp" "kpc-prdapp" "kpi-prdapp")
+ 
+aws1_accounts=("npd" "prd" "npdcnct" "prdcnct" "dat" "npddat" "npddtl" "prddtl" "npddep" "prddep" "svc")
+ 
+for env in "${environment[@]}"; do
+if [[ $env == "tst" ]]; then
+for account in "${tst_accounts[@]}"
+do
+OWNER_ID=$(AWS_PROFILE=${account} aws iam get-user --user-name jenkinsdeploy | grep Arn | awk -F":" '{print $6}')
+ACCOUNT_NAME=${account}
+AWS_PROFILE=${account} aws s3api list-buckets --query "Buckets[*].{Name:Name,CreationDate:CreationDate}" --output text | while read -r line; do
+        BUCKET_NAME=$(echo $line | awk '{print $1}')
+        CREATION_DATE=$(echo $line | awk '{print $2}')
+echo "$OWNER_ID,$ACCOUNT_NAME,$BUCKET_NAME,$CREATION_DATE" >> $output_file
+done
+done
+elif [[ $env == "prd" ]]; then
+for account in "${prd_accounts[@]}"
+do
+OWNER_ID=$(AWS_PROFILE=${account} aws iam get-user --user-name jenkinsdeploy | grep Arn | awk -F":" '{print $6}')
+ACCOUNT_NAME=${account}
+AWS_PROFILE=${account} aws s3api list-buckets --query "Buckets[*].{Name:Name,CreationDate:CreationDate}" --output text | while read -r line; do
+        BUCKET_NAME=$(echo $line | awk '{print $1}')
+        CREATION_DATE=$(echo $line | awk '{print $2}')
+echo "$OWNER_ID,$ACCOUNT_NAME,$BUCKET_NAME,$CREATION_DATE" >> $output_file
+done
+done
+elif [[ $env == "dev" ]]; then
+for account in "${dev_accounts[@]}"
+do
+OWNER_ID=$(AWS_PROFILE=${account} aws iam get-user --user-name jenkinsdeploy | grep Arn | awk -F":" '{print $6}')
+ACCOUNT_NAME=${account}
+AWS_PROFILE=${account} aws s3api list-buckets --query "Buckets[*].{Name:Name,CreationDate:CreationDate}" --output text | while read -r line; do
+        BUCKET_NAME=$(echo $line | awk '{print $1}')
+        CREATION_DATE=$(echo $line | awk '{print $2}')
+echo "$OWNER_ID,$ACCOUNT_NAME,$BUCKET_NAME,$CREATION_DATE" >> $output_file
+done
+done
+else
+for account in "${aws1_accounts[@]}"
+do
+OWNER_ID=$(AWS_PROFILE=${account} aws iam get-user --user-name jenkinsdeploy | grep Arn | awk -F":" '{print $6}')
+ACCOUNT_NAME=${account}
+AWS_PROFILE=${account} aws s3api list-buckets --query "Buckets[*].{Name:Name,CreationDate:CreationDate}" --output text | while read -r line; do
+        BUCKET_NAME=$(echo $line | awk '{print $1}')
+        CREATION_DATE=$(echo $line | awk '{print $2}')
+echo "$OWNER_ID,$ACCOUNT_NAME,$BUCKET_NAME,$CREATION_DATE" >> $output_file
+done
+done
+fi
+done
+echo "Report generated: $output_file"
+ 
+ 
+***************************************************
+ 
+	
+ 
+ 
+*****************************************************************************************
+ 
+ 
+pipeline {
+    agent any
+ 
+    stages {
+        stage('S3 Inventory for tst') {
+            environment {
+                environment = 'tst'
+                accounts=("kat-tstapp")
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'jenkins_gitlab', keyFileVariable: 'SSH_KEY')]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "bash -x ./S3-Inventory.sh ${environment}"
+                    sh 'git checkout ./S3-Inventory.sh'
+ 
+                }
+            }
+        }
+        stage('S3 Inventory for dev') {
+            environment {
+                environment = 'dev'
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'jenkins_gitlab', keyFileVariable: 'SSH_KEY')]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "bash -x ./S3-Inventory.sh ${environment}"
+                    sh 'git checkout ./S3-Inventory.sh'
+ 
+                }
+            }
+        }
+        stage('S3 Inventory for prd') {
+            environment {
+                environment = 'prd'
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'jenkins_gitlab', keyFileVariable: 'SSH_KEY')]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "bash -x ./S3-Inventory.sh ${environment}"
+                    sh 'git checkout ./S3-Inventory.sh'
+ 
+                }
+            }
+        }
+        stage('S3 Inventory for aws1_npd') {
+            environment {
+                environment = 'aws1'
+            }
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "awskey-npd"]]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "bash -x ./S3-Inventory.sh ${environment}"
+                    sh 'git checkout ./S3-Inventory.sh'
+ 
+                }
+            }
+        }
+ 
+        stage('S3 Inventory for aws1_svc') {
+            environment {
+                environment = 'aws1'
+            }
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: "awskey-svc"]]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "bash -x ./S3-Inventory.sh ${environment}"
+                    sh 'git checkout ./S3-Inventory.sh'
+ 
+                }
+            }
+        }
+    }
+   post { 
+        always { 
+            archiveArtifacts artifacts: 's3-inventory-report.csv', onlyIfSuccessful: true
+ 
+            deleteDir()
+        }
+    }
+}
