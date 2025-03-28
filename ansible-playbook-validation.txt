@@ -1,0 +1,172 @@
+#!/bin/bash
+AGE="1"
+DESC_PREFIX="uptime inventory Report"
+REGION="us-east-1"
+environment=("dev")
+ 
+dev_accounts=("kat-devapp")
+ 
+for env in "${environment[@]}"; do
+if [[ $env == "dev" ]]; then
+for account in "${dev_accounts[@]}"
+do
+ 
+INVENTORY_FILE="inventory"
+# Fetch EC2 instances and their hostnames
+AWS_PROFILE=${account} aws ec2 describe-instances --region $REGION --query 'Reservations[*].Instances[*].{Hostname:Tags[?Key==`Name`].Value|[0],PrivateIpAddress:PrivateIpAddress,State:State.Name}' --output text > $INVENTORY_FILE
+# Format the inventory file
+echo "[ec2_instances]" > $INVENTORY_FILE.tmp
+while read -r line; do
+HOSTNAME=$(echo $line | awk '{print $1}')
+IP=$(echo $line | awk '{print $2}')
+echo "$HOSTNAME" ansible_host="$IP" >> $INVENTORY_FILE.tmp
+done < $INVENTORY_FILE
+mv $INVENTORY_FILE.tmp $INVENTORY_FILE
+done
+fi
+done
+ 
+ 
+ 
+---
+ 
+- name: Collect server uptime details and store in CSV
+  hosts: ec2_instances
+  gather_facts: true
+  become: yes
+  tasks:
+    - name: Get server uptime
+      command: uptime -p
+      register: uptime_output
+      changed_when: false
+    - name: Generate CSV content with uptime details
+      set_fact:
+        uptime_csv: "{{ uptime_csv | default('Hostname,Uptime\n') }}{{ ansible_hostname }},{{ uptime_output.stdout }}\n"
+    - name: Display the collected uptime data (optional)
+      debug:
+        msg: "{{ uptime_csv }}"
+ 
+ 
+ 
+pipeline {
+    agent any
+    stages {
+        stage('Generate Inventory') {
+            environment {
+                environment = 'dev'
+            }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'jenkins_gitlab', keyFileVariable: 'SSH_KEY')]) {
+                    sh 'chmod 755 ./S3-Inventory.sh'
+                    sh "sed -i 's/\r//' S3-Inventory.sh"
+                    sh './S3-Inventory.sh ${environment}'
+                    sh 'git checkout ./S3-Inventory.sh'
+                }
+            }
+        }
+        stage('Run Ansible Playbook') {
+            steps {
+                withCredentials([file(credentialsId: "kemper-kat-devapp-common-us-east-1.pem", variable: "SSH_KEY")]) {
+                script {
+                    // Run the Ansible playbook to get server details
+                    catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    sh 'ansible-playbook -i inventory get_server_uptime.yml --private-key $SSH_KEY'
+                    }
+                }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            // Archive the inventory and playbook results
+            archiveArtifacts artifacts: 'inventory', onlyIfSuccessful: true
+            deleteDir()
+        }
+    }
+}
+ 
+ 
+ 
+EKS sample job:
+ 
+ 
+pipeline {
+    agent any
+    stages {
+        stage('Get Nodes') {
+          when {
+            expression { params.Action == 'GetNodes' }
+          }
+            steps {
+                script {
+                    sh ( script: "AWS_DEFAULT_PROFILE=${ACCOUNT} KUBECONFIG=~/.kube/config-eks-${env.Account}-${env.ClusterName} /usr/local/bin/kubectl get nodes -o wide")
+                }
+            }
+        }
+        stage('Get Pods') {
+          when {
+            expression { params.Action == 'GetPods' }
+          }
+            steps {
+                script {
+                    sh ( script: "AWS_DEFAULT_PROFILE=${ACCOUNT} KUBECONFIG=~/.kube/config-eks-${env.Account}-${env.ClusterName} /usr/local/bin/kubectl get pods --namespace ${NameSpace}")
+                }
+            }
+        }
+    }
+}
+ 
+ 
+
+
+
+
+
+
+*******************
+
+
+
+To calculate the throughput and IOPS of a volume
+ 
+CloudWatch >> All Metrics >> Browse >> All >> EBS >> Per-Volume Metrics >> Select Volume -Writebytes, Writeops, Readbytes, Readops for the volume id you want to check the throughput of >> click on "Add Math" >> "All Functions" >> "Sum" >> Set Statistic="Sum" >> edit the e1 and give the below formula: 
+  
+Throughput formula in AWS CloudWatch 
+(Volume Readbytes [m1] + Volume Writebytes[m2] )/(PERIOD(Volume Readbytes [m1] )) 
+ 
+ 
+IOPS formula in AWS CloudWatch 
+ Volume Readops [m1] + Volume Writeops[m2] )/(PERIOD(Volume Readops [m1] )) 
+
+ex: (m1+m2)/(PERIOD(m1))
+
+******************************
+
+
+
+
+
+
+pipeline {
+    agent any
+    stages {
+        stage(delete_the_s3_bucket) {
+            steps {
+                script {
+                    sh ( script: "AWS_PROFILE=prdcnct aws s3 rm s3://serverless-kct-p0-prdcnct-ecc-s3-redshiftbucket/ --recursive")
+                }
+            }
+        }
+    }
+}
+
+
+
+
+**********************************
+
+
+
+
+
