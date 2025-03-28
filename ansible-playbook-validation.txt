@@ -165,7 +165,10 @@ pipeline {
 
 
 **********************************
+aws configure sso
+aws ssm start-session –target <Instance-id> --profile <Profile name>
 
+****************************
 
 
 
